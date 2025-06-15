@@ -7,7 +7,8 @@ from byte import Encrypt_ID, encrypt_api
 
 app = Flask(__name__)
 
-current_uid = {"uid": None, "start_time": 0}
+# UID yang sedang aktif
+current_uid = {"uid": None}
 lock = threading.Lock()
 
 def load_tokens():
@@ -40,27 +41,36 @@ def send_friend_request(uid, token):
     }
 
     try:
-        requests.post(url, headers=headers, data=bytes.fromhex(encrypted_payload), timeout=3)
+        response = requests.post(url, headers=headers, data=bytes.fromhex(encrypted_payload), timeout=3)
+        print(f"[{uid}] Status: {response.status_code}")
     except Exception as e:
-        print(f"Gagal kirim request: {e}")
+        print(f"[{uid}] Gagal kirim request: {e}")
 
 def continuous_send(uid, tokens):
     start_time = time.time()
+    duration_limit = 60  # dalam detik
+
+    print(f"🚀 Memulai loop untuk UID {uid}")
 
     while True:
         with lock:
-            # Hentikan jika UID telah berubah
             if current_uid["uid"] != uid:
-                print("UID berubah, hentikan loop.")
+                print(f"🛑 UID berubah, hentikan loop {uid}")
                 break
 
-        if time.time() - start_time > 60:
-            print("Melewati batas waktu 60 detik, berhenti.")
+        # Cek waktu habis
+        elapsed = time.time() - start_time
+        if elapsed > duration_limit:
+            print(f"⏱️ Waktu habis (>{duration_limit}s), hentikan loop {uid}")
             break
 
+        print(f"🔁 Looping request ke {uid}...")
+
+        # Kirim semua token
         for token in tokens[:110]:
             threading.Thread(target=send_friend_request, args=(uid, token)).start()
-        time.sleep(1.5)  # jeda sedikit agar tidak ban atau overload
+
+        time.sleep(3)  # Tunggu 3 detik sebelum looping berikutnya
 
 @app.route("/send_requests", methods=["GET"])
 def send_requests():
@@ -74,12 +84,12 @@ def send_requests():
 
     with lock:
         current_uid["uid"] = uid
-        current_uid["start_time"] = time.time()
 
+    # Jalankan proses pengiriman di background
     threading.Thread(target=continuous_send, args=(uid, tokens)).start()
 
     return jsonify({
-        "message": "Friend request loop started for UID",
+        "message": "Looping friend request setiap 3 detik dimulai.",
         "uid": uid,
         "status": 1
     })
@@ -90,6 +100,9 @@ def stop_requests():
         current_uid["uid"] = None
 
     return jsonify({
-        "message": "Stopped current request loop",
+        "message": "Loop dihentikan secara manual.",
         "status": 0
     })
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
